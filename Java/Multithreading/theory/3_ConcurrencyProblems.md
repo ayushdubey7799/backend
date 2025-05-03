@@ -15,3 +15,4 @@
 ## Deadlock
 - A deadlock occurs when two or more threads are waiting indefinitely for each other to
   release locks they need.
+- Result: Threads are stuck forever. | Application freezes or hangs.
