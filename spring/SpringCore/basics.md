@@ -51,54 +51,242 @@
     - Used for configuration-level changes, e.g., in Spring Boot auto-configuration.
 
 
+## Bean Scopes in Spring @Scope("")
+- `singleton (default)` 
+    - One bean instance per Spring container, created at container startup (eager by default).
+- `prototype`
+    - A new bean instance is created every time it's requested.
+    - Spring injects it and then does not manage it further (no destruction callbacks).
+### Web Scopes 
+- @Scope(value = WebApplicationContext.SCOPE_REQUEST, proxyMode = ScopedProxyMode.TARGET_CLASS)
+    - `request`: One bean per HTTP request, destroyed at end of the request.
+    - `session`: One bean per HTTP session.
+    - `application`: One bean for the lifecycle of the ServletContext.
+    - `websocket`: One bean per WebSocket session.
+
+- ✅ Web scopes must use proxies to work with singleton-scoped components.
 
 
-4. BeanFactory vs ApplicationContext
-BeanFactory: Lightweight, lazy-init, core container
+| Scope         | Managed Lifetime  | Instantiation   | Destruction Managed By |
+| ------------- | ----------------- | --------------- | ---------------------- |
+| `singleton`   | Entire app        | On context load | Spring container       |
+| `prototype`   | Per request       | On-demand       | You (not Spring)       |
+| `request`     | HTTP request      | Per HTTP req    | Web container          |
+| `session`     | HTTP session      | Per session     | Web container          |
+| `application` | ServletContext    | App-wide        | Web container          |
+| `websocket`   | WebSocket session | Per WS session  | WebSocket container    |
 
-ApplicationContext: Feature-rich, supports events, messages, resource loading
 
-Common types: ClassPathXmlApplicationContext, AnnotationConfigApplicationContext
+### BeanFactory vs ApplicationContext
+- ApplicationContext extends BeanFactory and is the standard for almost all real-world Spring applications.
 
-5. Java-based Configuration
-@Configuration + @Bean vs Component scanning
+| Feature                         | `BeanFactory`                             | `ApplicationContext`                                 |
+|--------------------------------|-------------------------------------------|------------------------------------------------------|
+| **Purpose**                    | Core Spring DI container                  | Extended container with enterprise features          |
+| **Initialization**             | Lazy — beans are created when requested   | Eager — singleton beans are created at startup       |
+| **Resource Loading**           | Limited                                   | Full support via `Resource` abstraction              |
+| **Internationalization (i18n)**| ❌ Not supported                           | ✅ Supported via `MessageSource`                     |
+| **Event Publishing**           | ❌ Not supported                           | ✅ Built-in support with `ApplicationEventPublisher` |
+| **Bean Post-Processors**       | Manual registration required              | Auto-detected and registered                         |
+| **AOP & Declarative Transactions** | ❌ Not supported                        | ✅ Fully supported                                   |
+| **Environment Abstraction**    | ❌ Not supported                           | ✅ Supports `Environment`, profiles, property sources|
 
-Bean definition control and customization
+---
 
-Conditional beans: @Conditional, @Profile
+### 📦 Common Implementations of `ApplicationContext`
 
-6. Component Scanning & Stereotype Annotations
-@Component, @Service, @Repository, @Controller
+- **`ClassPathXmlApplicationContext`**
+    - Loads bean definitions from an XML file in the classpath.
+    ```java
+    ApplicationContext context = new ClassPathXmlApplicationContext("beans.xml");
+    ```
+- **`AnnotationConfigApplicationContext`**
+    - Loads beans from Java @Configuration annotated classes.
+    ``` java
+    ApplicationContext context = new AnnotationConfigApplicationContext(AppConfig.class);
+    ```
+- **`GenericWebApplicationContext`**
+    - Web-aware context used in Spring MVC or Boot applications.
 
-@ComponentScan, basePackages, excludeFilters, includeFilters
+### Use Cases and Recommendations
+- Use ApplicationContext:
+    - In almost all applications — it is feature-rich and supports advanced Spring features.
+    - In Spring Boot and Spring MVC applications (automatically used under the hood).
+    - When working with AOP, transactions, events, or message resolution.
 
-7. Spring Expression Language (SpEL)
-Syntax: #{expression}
+- Use BeanFactory:
+    - In memory-constrained environments like mobile or IoT.
+    - When writing custom frameworks or low-level Spring extensions.
+    - If you need fine-grained lazy initialization control (though @Lazy can handle this in ApplicationContext too).
+ 
 
-Common use: @Value("#{systemProperties['user.home']}")
+## Java-based Configuration
 
-Used in conditional logic, bean definitions
+- `@Configuration` + `@Bean`
+    - **Explicitly defines beans using Java methods**.
+    - Provides **full control** over bean creation and wiring.
+    - Ideal for integrating **third-party or complex object graphs**.
+    - Pros:
+        - Fine-grained control over instantiation
+        - Useful when you need to pass parameters manually or use logic
+        - Great for unit testing
+- Bean Definition Customization (scope, lazy-init, init/destroy methods, or proxies)
+    - ```java
+        @Bean(initMethod = "init", destroyMethod = "cleanup")
+        @Scope(value = "prototype")
+        @Lazy
+        public ExpensiveService expensiveService() {
+            return new ExpensiveService();
+        }
+      ```
+- Conditional Bean Registration @Conditional
+    - Activates beans based on custom logic or environment conditions.
+    - Implement Condition interface.
+    ```java
+        @Bean
+        @Conditional(ProductionCondition.class)
+        public DataSource prodDataSource() {
+            return new HikariDataSource();
+        }
+    ```
+- @Profile: Activates beans based on active Spring profile(s).
+  ```java
+    @Profile("dev")
+    @Bean
+    public DataSource devDataSource() {
+        return new H2DataSource();
+    }
+  ```
+    - In Properties file: spring.profiles.active=dev
 
-8. Environment and Property Management
-External config: application.properties, application.yml
 
-@Value, @PropertySource, Environment
 
-Profile activation: @Profile("dev")
 
-9. Aware Interfaces
-Gain access to Spring internals:
 
-ApplicationContextAware
 
-BeanNameAware
+## Component Scanning & Stereotype Annotations
 
-EnvironmentAware
+### Stereotype Annotations
 
-10. Spring Utilities (Core)
-Packages: org.springframework.core, org.springframework.util
+Spring uses these annotations to mark classes for automatic detection and registration as beans:
 
-Key utilities: StringUtils, CollectionUtils, Assert, ObjectUtils
+| Annotation      | Typical Layer          | Purpose                                           |
+|----------------|------------------------|---------------------------------------------------|
+| `@Component`    | Generic component      | Base annotation for all Spring-managed beans     |
+| `@Service`      | Service layer          | Indicates business logic/service class           |
+| `@Repository`   | Persistence layer      | Encapsulates data access, enables exception translation |
+| `@Controller`   | Web layer (Spring MVC) | Handles web requests and returns views/responses |
+
+> ℹ️ All of the above are effectively specializations of `@Component`.
+
+---
+
+### Component Scanning
+- Enables Spring to **automatically detect and register beans** in specified packages.
+```java
+@Configuration
+@ComponentScan(basePackages = "com.example.app")
+public class AppConfig { }
+```
+#### Fine-Tuning with Filters
+- `includeFilters`
+    - Only include matching components.
+    - ```java 
+        @ComponentScan(
+        basePackages = "com.example",
+        includeFilters = @ComponentScan.Filter(type = FilterType.ANNOTATION, classes = Service.class),
+        useDefaultFilters = false)
+- `excludeFilters`
+    - Exclude specific classes or patterns from scanning.
+    - ```java
+        @ComponentScan(
+        basePackages = "com.example",
+        excludeFilters = @ComponentScan.Filter(type = FilterType.REGEX, pattern = ".*Test.*"))
+#### Best Practices
+- Use @Service, @Repository, @Controller for clarity and semantics.
+- Keep package structure clean to allow targeted scanning.
+- Avoid overusing @ComponentScan in submodules — prefer modular configs.
+- Combine with @Configuration classes for fine-grained bean setup.
+
+
+## Spring Expression Language (SpEL)
+### 🔹 What is SpEL?
+Spring Expression Language (SpEL) is a powerful expression language used for:
+- Injecting values into beans
+- Conditional logic in configuration
+- Dynamic property resolution
+- Runtime bean manipulation
+
+### 🔤 Syntax Basics
+- Basic format: `#{expression}`
+- Supports property access, method invocation, arithmetic, logical ops, etc.
+
+```java
+@Value("#{2 * 10}")             // 20
+@Value("#{user.age > 18}")      // true/false
+@Value("#{systemProperties['user.home']}")  // OS user home path
+@Value("#{someBean.method()}")  // Method call on another bean
+```
+
+### Common Use Cases
+- Injecting system/env properties @Value("#{systemEnvironment['JAVA_HOME']}")
+- Conditional configuration @ConditionalOnExpression("#{environment['app.feature.enabled'] == 'true'}")
+- Bean referencing @Value("#{anotherBean.someProperty}")
+
+## Environment and Property Management
+- External Configuration: `application.properties` / `application.yml`
+    - **`application.properties`**
+        - Most common way to externalize configuration values.
+        - Can be placed in `src/main/resources` or external directories.
+- Accessing Configuration Values:
+    - @Value annotation: Inject values directly from properties files into fields or method parameters.
+    - @Value("${database.url}")
+    - @PropertySource: Externalizes properties files that are not part of the default application.properties or application.yml.
+    ```java
+    @Configuration
+    @PropertySource("classpath:custom.properties")
+    public class AppConfig {
+        @Value("${custom.property}")
+        private String customProperty;
+    }
+    ```
+    - Using Environment API: The Environment interface provides a programmatic way to access properties.
+    ```java
+    @Autowired
+    private Environment environment;
+    public void printAppInfo() {
+        String appName = environment.getProperty("app.name");
+        System.out.println("App Name: " + appName);
+    }
+    ```
+- Profile Activation
+    - Spring profiles allow you to segregate parts of your application configuration and make it available only in certain environments.
+    - Using @Profile Annotation: 
+        - Activates beans only when a particular profile is active.
+        - ```java
+            @Configuration
+            @Profile("dev")
+            public class DevConfig {
+                @Bean
+                public DataSource dataSource() {
+                    return new H2DataSource();
+                }
+            }
+          ```
+        - Multiple profiles can be active at once.
+        - Activating Profiles
+
+
+
+## Aware Interfaces
+- Gain access to Spring internals: ApplicationContextAware, BeanNameAware, EnvironmentAware
+
+## Spring Utilities (Core)
+- Packages: org.springframework.core, org.springframework.util
+- Key utilities: StringUtils, CollectionUtils, Assert, ObjectUtils
+
+
+# Interview Questions
 
 1. `How does Spring implement Inversion of Control (IoC) internally?`
 Spring's IoC container manages object creation and wiring. The BeanFactory interface serves as the core container, responsible for instantiating, configuring, and assembling beans. The ApplicationContext extends BeanFactory, adding more enterprise-specific functionality like event propagation and internationalization.
